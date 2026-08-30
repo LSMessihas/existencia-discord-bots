@@ -1,30 +1,39 @@
 # Existencia Discord Bots
 
-This repository contains two Discord bots developed for the Tibia guild **Existencia**.
+This repository contains two Discord bots developed for the Tibia guild **Existencia** on **Celesta**.
 
-The project currently includes:
+The project includes:
 
-- **Exura Bot** — Tibia information and utility bot.
-- **Guild House Bot** — Guild House management, dummy reservations and payment tracking.
+- **Exura** — A Tibia information and utility bot.
+- **GH Existencia Bot** — A Guild House management, training dummy reservation and payment tracking bot.
 
-The source code is public so server administrators and community staff can review exactly what the bots do before adding them to their Discord servers.
+The source code is publicly available so Discord server administrators and community staff can review exactly what the bots do before adding them to their servers.
 
 ---
 
-# Exura Bot
+# Exura
 
-Exura is a Discord bot focused on providing useful Tibia information and tools directly inside Discord.
+**Exura** is a Discord bot focused on providing useful Tibia information and tools directly inside Discord.
 
 ## Main Features
 
 ### Character Information
+
 Retrieve information about Tibia characters using external Tibia data sources.
 
 ### Guild Information
-Check guild information and currently online guild members.
+
+Check guild information and currently online guild members, including information such as:
+
+- Character name
+- Level
+- Vocation
+- Guild rank
+- Online status
 
 ### Creature / Bestiary Information
-Search creatures and display information such as:
+
+Search Tibia creatures and display useful information such as:
 
 - Hit Points
 - Experience
@@ -36,13 +45,27 @@ Search creatures and display information such as:
 - Locations
 - Loot
 
-Elemental weaknesses and damage types are automatically sorted so players can quickly identify the best offensive element and the most important protections.
+Elemental weaknesses are automatically sorted so players can quickly identify which damage types are most effective against a creature.
 
-### Hunt Analyzer
+Incoming damage types are also organized to help players understand which elemental protections they should prioritize.
 
-Players can enter multiple creatures from a hunting ground and Exura combines their statistics.
+---
 
-The bot calculates:
+## Hunt Analyzer
+
+Exura includes a Hunt Analyzer capable of analyzing multiple creatures from the same hunting ground.
+
+Instead of checking every creature individually, players can enter all the creatures they expect to encounter.
+
+For example:
+
+```text
+Juggernaut
+Demon Outcast
+Dark Torturer
+```
+
+Exura combines their information and calculates:
 
 - Best elemental damage to use
 - Average elemental effectiveness
@@ -50,20 +73,26 @@ The bot calculates:
 - Recommended elemental protections
 - Secondary protection priorities
 
-This is intended to help players prepare their equipment before hunting.
+The purpose is to help players prepare their weapons, equipment, imbuments and elemental protection before starting a hunt.
 
-### Boss Information
+---
 
-Search Tibia bosses and retrieve relevant information.
+## Boss Information
+
+Exura can search Tibia bosses and display relevant information about them.
 
 The bot also supports information related to:
 
 - Boosted Creature
 - Boosted Boss
 
-### Item Information
+This allows players to check useful daily information directly from Discord.
 
-Search Tibia equipment and other items.
+---
+
+## Item Information
+
+Players can search Tibia equipment and other items.
 
 Depending on the available data, Exura can display:
 
@@ -71,12 +100,14 @@ Depending on the available data, Exura can display:
 - Equipment slot
 - Vocation requirements
 - Elemental resistances
-- Skills
+- Skill bonuses
 - Other relevant properties
 
-### Market Information
+---
 
-Exura integrates Tibia market information.
+## Celesta Market Information
+
+Exura integrates Tibia Market information.
 
 Market data can include:
 
@@ -88,71 +119,131 @@ Market data can include:
 
 The default world currently used by the bot is **Celesta**.
 
-### Weekly Delivery Items
+---
 
-The bot contains the complete list of **476 items that can appear in Tibia Weekly Delivery Tasks**.
+## Weekly Delivery Items
+
+Exura contains the complete list of **476 items that can appear in Tibia's Weekly Delivery Tasks**.
 
 Using:
 
-`/exura delivery`
+```text
+/exura delivery
+```
 
-players can compare:
+players can browse the Delivery Item database and compare:
 
 **NPC sell price vs Celesta Market price**
 
-The main purpose of this feature is to help players identify items stored in their Stash that may be worth significantly more when sold to other players instead of selling them directly to an NPC.
+### Why this feature exists
 
-The Delivery interface includes:
+The main purpose is not simply to search the Market price of an individual item.
 
+Tibia players accumulate hundreds or thousands of creature products in their **Stash** while hunting.
+
+When players periodically sell their accumulated loot, many of these items may be sold automatically to NPCs even though some can be worth considerably more when sold to other players through the Market.
+
+The Delivery tool helps identify these items.
+
+Instead of manually checking hundreds of items one by one, players can quickly see:
+
+> **Which items should I keep from my NPC sale and sell on the Market instead?**
+
+The interface includes:
+
+- All 476 eligible Delivery Items
+- NPC sell prices
+- Celesta Market prices
 - Alphabetical sorting
 - Letter filtering
 - Pagination
-- NPC prices
-- Celesta Market prices
-- Cached market information to avoid unnecessary API requests
+- Market data caching
 
-### Hunt Split Calculator
+Market information is cached to avoid unnecessary API requests and reduce the risk of API rate limiting.
 
-Exura can process Hunt Analyzer data copied directly from Tibia.
+---
 
-It calculates:
+## Hunt Split Calculator
+
+Exura can process **Hunt Analyzer data copied directly from Tibia**.
+
+The bot analyzes:
 
 - Total loot
 - Total supplies
 - Total profit or waste
 - Session duration
 - Individual player balances
-- Equal profit share
+- Damage
+- Healing
+- Equal profit per player
 - Profit per hour
-- Required transfers between party members
 
-It can also generate the corresponding Tibia bank transfer commands.
+It then automatically calculates the transfers required to distribute the hunt profit equally between party members.
+
+For example:
+
+```text
+Player A has to pay 850,000 gp to Player B
+```
+
+The bot can also generate the corresponding Tibia bank transfer command:
+
+```text
+transfer 850000 to Player B
+```
+
+This removes the need to calculate party hunt splits manually.
 
 ---
 
-# Guild House Bot
+# GH Existencia Bot
 
-The Guild House bot was developed to automate the management of the **Existencia Guild House**.
+The **GH Existencia Bot** was developed to automate the management of the Existencia Guild House.
 
-## Dummy Reservations
+Its main purpose is to manage training dummy reservations, Guild House payments and membership privileges directly through Discord.
+
+---
+
+## Training Dummy Reservations
 
 Guild members can reserve training dummy time directly through Discord.
 
-The system supports:
+The reservation system supports:
 
 - Date selection
-- Start and end time
+- Starting time
+- Ending time
 - Reservation conflict detection
 - Reservation cancellation
-- Reservation limits depending on membership status
+- Reservation limits based on membership status
 
-The bot prevents overlapping reservations automatically.
+The bot automatically prevents two players from reserving the same dummy during overlapping time periods.
+
+---
+
+## Reservation Limits
+
+Different Guild House membership levels can have different reservation privileges.
+
+For example, contributing Guild House members can receive longer reservation periods than regular members.
+
+These limits are configured through environment variables and enforced automatically by the bot.
+
+---
 
 ## Reservation Panel
 
-The bot maintains a Discord panel showing current dummy reservations.
+The bot maintains a dedicated Discord panel showing current training dummy reservations.
 
-The panel updates automatically whenever reservations are created or cancelled.
+The panel automatically updates whenever:
+
+- A reservation is created
+- A reservation is cancelled
+
+This allows Guild House members to quickly see when the training dummy is available.
+
+---
 
 ## Guild House Payments
 
@@ -161,17 +252,27 @@ The bot can register payments related to:
 - Guild House rent
 - Training dummy usage
 
-Guild House rent can also be paid several months in advance.
+Guild House rent can also be registered several months in advance.
 
-Administrators can review or remove payment records when necessary.
+For example, if a member pays three months of rent at once, the bot can register those months individually.
 
-## Discord Role Management
+Administrators can also review payment information and remove incorrect payment records when necessary.
+
+---
+
+## Automatic Discord Role Management
 
 The payment system is connected to Discord roles.
 
-The bot can automatically assign membership roles depending on Guild House payment status.
+The bot can automatically assign Guild House membership roles depending on payment status.
 
-These roles can also determine reservation privileges.
+These roles can then determine:
+
+- Guild House membership
+- Training dummy privileges
+- Maximum reservation duration
+
+This reduces the amount of manual administration required from guild leaders.
 
 ---
 
@@ -180,16 +281,149 @@ These roles can also determine reservation privileges.
 ```text
 existencia-discord-bots/
 │
-├── exura/
+├── Exura/
 │   ├── bot.py
+│   ├── data/
 │   ├── services/
 │   ├── requirements.txt
 │   └── .env.example
 │
-├── gh-bot/
+├── GH Existencia Bot/
 │   ├── bot.py
 │   ├── requirements.txt
 │   └── .env.example
 │
 ├── .gitignore
 └── README.md
+```
+
+---
+
+# External Data Sources
+
+Exura retrieves public Tibia information from external services.
+
+Current integrations include services related to:
+
+- TibiaData
+- TibiaWiki
+- Tibia Market information
+
+These API requests are used only to retrieve Tibia-related public information.
+
+Market information is cached where appropriate to avoid unnecessary requests and API rate-limit issues.
+
+---
+
+# Configuration
+
+Both bots use environment variables for configuration.
+
+Real credentials are **not included in this repository**.
+
+Each bot includes a `.env.example` file showing which environment variables are required.
+
+For example:
+
+```env
+DISCORD_TOKEN=""
+```
+
+For Exura:
+
+```env
+DISCORD_TOKEN=""
+DELIVERY_WORLD="Celesta"
+DELIVERY_CACHE_HOURS="12"
+```
+
+The actual `.env` files containing real credentials must remain local and must never be committed to the repository.
+
+---
+
+# Security
+
+Discord bot tokens and other sensitive credentials are **not stored in the source code**.
+
+Sensitive configuration is loaded through environment variables.
+
+The repository's `.gitignore` excludes:
+
+- `.env` files
+- Local databases
+- Python cache files
+- Logs
+- Temporary files
+- Local development files
+
+Local databases used for reservations, payments or cached Market information are not included in the public repository.
+
+---
+
+# Discord Permissions
+
+The bots only require Discord permissions necessary for their functionality.
+
+Depending on the enabled features, these may include:
+
+- Sending messages
+- Using slash commands
+- Embedding links
+- Reading channels where commands are used
+- Managing specific Guild House roles
+
+**Exura does not require Administrator permission for its normal Tibia information and utility commands.**
+
+---
+
+# Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/LSMessihas/existencia-discord-bots.git
+```
+
+Enter the directory of the bot you want to run.
+
+For example:
+
+```bash
+cd Exura
+```
+
+Install its dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Create a `.env` file based on `.env.example` and add your Discord bot token and required configuration.
+
+Then start the bot:
+
+```bash
+python bot.py
+```
+
+The same process can be followed for the Guild House bot using its own directory and `requirements.txt`.
+
+---
+
+# Transparency
+
+These bots were originally developed for the **Existencia** guild on **Celesta**.
+
+The source code is public so Tibia community members and Discord server administrators can inspect the implementation and verify exactly what the bots do before allowing them onto their servers.
+
+The goal of this repository is to provide useful community tools while keeping their implementation transparent and auditable.
+
+---
+
+# Disclaimer
+
+This is an independent community project.
+
+It is not affiliated with, endorsed by, sponsored by, or associated with **CipSoft GmbH** or **Tibia**.
+
+Tibia and all Tibia-related content are trademarks of their respective owners.
