@@ -294,8 +294,12 @@ existencia-discord-bots/
 │   └── .env.example
 │
 ├── .gitignore
+├── LICENSE
+├── SECURITY.md
 └── README.md
 ```
+
+SQLite databases used for reservations, payments and cached data are generated locally when required and are intentionally excluded from the repository.
 
 ---
 
@@ -323,13 +327,7 @@ Real credentials are **not included in this repository**.
 
 Each bot includes a `.env.example` file showing which environment variables are required.
 
-For example:
-
-```env
-DISCORD_TOKEN=""
-```
-
-For Exura:
+## Exura configuration
 
 ```env
 DISCORD_TOKEN=""
@@ -337,7 +335,206 @@ DELIVERY_WORLD="Celesta"
 DELIVERY_CACHE_HOURS="12"
 ```
 
+## GH Existencia Bot configuration
+
+The Guild House bot requires additional configuration for the Discord server, channels, roles and reservation limits.
+
+An example configuration is provided in:
+
+```text
+GH Existencia Bot/.env.example
+```
+
 The actual `.env` files containing real credentials must remain local and must never be committed to the repository.
+
+---
+
+# Discord Bot Setup
+
+Before running either bot, create a Discord application and bot account through the **Discord Developer Portal**.
+
+1. Create a new Discord application.
+2. Open the **Bot** section and create/configure the bot user.
+3. Generate or reset the bot token.
+4. Copy the token into the local `.env` file:
+
+```env
+DISCORD_TOKEN="YOUR_BOT_TOKEN"
+```
+
+**Never commit the real bot token to GitHub.**
+
+---
+
+# Required Discord Permissions
+
+## Exura
+
+Exura does **not** require Administrator permission.
+
+Recommended permissions:
+
+- View Channels
+- Send Messages
+- Embed Links
+- Use Application Commands
+
+The bot uses standard Discord functionality required to respond to slash commands and display Tibia information.
+
+## GH Existencia Bot
+
+The Guild House bot requires:
+
+- View Channels
+- Send Messages
+- Embed Links
+- Use Application Commands
+- Manage Roles
+
+`Manage Roles` is required for automatic Guild House membership role management.
+
+The bot's Discord role must be positioned **above the roles it needs to manage** in the Discord role hierarchy.
+
+Administrator permission is not required.
+
+---
+
+# Finding Discord IDs
+
+The Guild House bot requires several Discord IDs.
+
+Enable **Developer Mode** in Discord:
+
+```text
+User Settings → Advanced → Developer Mode
+```
+
+You can then right-click the relevant server or channel and select **Copy ID**.
+
+These values correspond to:
+
+```env
+GUILD_ID=""
+COMMAND_CHANNEL_ID=""
+SCHEDULE_CHANNEL_ID=""
+RENT_CHANNEL_ID=""
+```
+
+The role names and reservation limits can also be configured through the `.env` file.
+
+---
+
+# Installation
+
+## Requirements
+
+- Python 3
+- A Discord bot application
+- Internet access for Tibia-related API requests
+
+Clone the repository:
+
+```bash
+git clone https://github.com/LSMessihas/existencia-discord-bots.git
+```
+
+---
+
+## Running Exura
+
+Enter the Exura directory:
+
+```bash
+cd existencia-discord-bots/Exura
+```
+
+Install the dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Copy `.env.example` to `.env`.
+
+On Windows:
+
+```bash
+copy .env.example .env
+```
+
+On Linux/macOS:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add your Discord bot token.
+
+Then start Exura:
+
+```bash
+python bot.py
+```
+
+---
+
+## Running GH Existencia Bot
+
+Enter the Guild House bot directory.
+
+On Windows:
+
+```bash
+cd "existencia-discord-bots\GH Existencia Bot"
+```
+
+On Linux/macOS:
+
+```bash
+cd "existencia-discord-bots/GH Existencia Bot"
+```
+
+Install the dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Copy `.env.example` to `.env`.
+
+On Windows:
+
+```bash
+copy .env.example .env
+```
+
+On Linux/macOS:
+
+```bash
+cp .env.example .env
+```
+
+Configure the required Discord server ID, channel IDs, roles and reservation limits in `.env`.
+
+Then start the bot:
+
+```bash
+python bot.py
+```
+
+---
+
+# Local Databases
+
+The bots may create local SQLite databases for features such as:
+
+- Guild House reservations
+- Payment records
+- Market caching
+
+These databases are generated automatically when required.
+
+They are intentionally excluded from Git using `.gitignore` because they may contain local operational data and are not required as part of the source code.
 
 ---
 
@@ -356,57 +553,9 @@ The repository's `.gitignore` excludes:
 - Temporary files
 - Local development files
 
-Local databases used for reservations, payments or cached Market information are not included in the public repository.
+The repository also includes a `SECURITY.md` file describing how security vulnerabilities should be reported.
 
----
-
-# Discord Permissions
-
-The bots only require Discord permissions necessary for their functionality.
-
-Depending on the enabled features, these may include:
-
-- Sending messages
-- Using slash commands
-- Embedding links
-- Reading channels where commands are used
-- Managing specific Guild House roles
-
-**Exura does not require Administrator permission for its normal Tibia information and utility commands.**
-
----
-
-# Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/LSMessihas/existencia-discord-bots.git
-```
-
-Enter the directory of the bot you want to run.
-
-For example:
-
-```bash
-cd Exura
-```
-
-Install its dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Create a `.env` file based on `.env.example` and add your Discord bot token and required configuration.
-
-Then start the bot:
-
-```bash
-python bot.py
-```
-
-The same process can be followed for the Guild House bot using its own directory and `requirements.txt`.
+Security-related repository features such as dependency monitoring, secret protection and code scanning may also be enabled through GitHub.
 
 ---
 
@@ -417,6 +566,14 @@ These bots were originally developed for the **Existencia** guild on **Celesta**
 The source code is public so Tibia community members and Discord server administrators can inspect the implementation and verify exactly what the bots do before allowing them onto their servers.
 
 The goal of this repository is to provide useful community tools while keeping their implementation transparent and auditable.
+
+---
+
+# License
+
+This project is distributed under the **MIT License**.
+
+See the `LICENSE` file for details.
 
 ---
 
