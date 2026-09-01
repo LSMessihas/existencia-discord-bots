@@ -54,6 +54,9 @@ GUILD_NAME = "Existencia"
 
 BASE_DIR = Path(__file__).resolve().parent
 DELIVERY_DB_FILE = str(BASE_DIR / "delivery_cache.db")
+TRACKING_DB_FILE = str(BASE_DIR / "guild_tracking.db")
+TRACKING_POLL_SECONDS = int(os.getenv("TRACKING_POLL_SECONDS", "300"))
+TRACKING_MAX_CONCURRENCY = int(os.getenv("TRACKING_MAX_CONCURRENCY", "8"))
 DELIVERY_WORLD = os.getenv("DELIVERY_WORLD", "Celesta")
 DELIVERY_CACHE_HOURS = int(os.getenv("DELIVERY_CACHE_HOURS", "12"))
 TIBIA_MARKET_API = os.getenv(
@@ -254,7 +257,7 @@ def parse_session_hours(session):
     Converts:
     02:41h
 
-    into:
+    en:
     2.6833 hours
     """
 
@@ -744,7 +747,7 @@ def extract_max_damage_by_type(data):
 
 
 def normalize_creature_search_name(value):
-    """Normalizes a name so it can be compared regardless of uppercase letters,
+    """Normalize a name for comparison regardless of capitalization,
     accents, hyphens, apostrophes, or extra spaces.
     """
     if not value:
@@ -769,8 +772,8 @@ def normalize_creature_search_name(value):
 
 
 def creature_name_variants(name):
-    """Generates a few useful variants for Wiki pages that
-    sometimes use the plural name even when TibiaData returns the singular.
+    """Generate a few useful variants for Wiki pages that sometimes
+    use the plural name even when TibiaData returns the singular form.
     """
     name = str(name).strip()
 
@@ -807,13 +810,13 @@ def creature_name_variants(name):
 
 
 def get_creature_name_candidates(user_name, max_candidates=5):
-    """Finds the most likely name within the actual creature list.
+    """Find the most likely name in the real creature list.
 
     Priority:
     1. Exact match ignoring formatting.
-    2. Match that starts with the text.
-    3. Match that contains the text.
-    4. Fuzzy matching for minor spelling mistakes.
+    2. Match starting with the entered text.
+    3. Match containing the entered text.
+    4. Fuzzy matching for small spelling mistakes.
     """
     wanted = normalize_creature_search_name(user_name)
 
@@ -890,7 +893,7 @@ def get_creature_name_candidates(user_name, max_candidates=5):
 
 
 async def resolve_hunt_creature(user_name):
-    """Resolves user-entered text to a TibiaWiki creature.
+    """Resolve user-entered text to a TibiaWiki creature.
 
     Returns:
         (data, interpreted_name)
@@ -900,8 +903,8 @@ async def resolve_hunt_creature(user_name):
         max_candidates=5
     )
 
-    # If TibiaData does not find anything similar, we still try exactly
-    # what the user entered.
+    # If TibiaData finds nothing similar, still try the exact text
+    # entered by the user.
     if not candidates:
         candidates = [str(user_name).strip()]
 
@@ -920,7 +923,7 @@ async def resolve_hunt_creature(user_name):
             seen.add(normalized)
             lookup_names.append(variant)
 
-            # Avoid flooding the API if the name is badly misspelled.
+            # Avoid hammering the API if the name is badly misspelled.
             if len(lookup_names) >= 8:
                 break
 
@@ -1147,13 +1150,13 @@ def build_hunt_embed(
         attack_lines.append(
             f"{position} {entry['emoji']} "
             f"**{entry['element']}** — "
-            f"**{average:.1f}%** average "
-            "effectiveness"
+            f"**{average:.1f}%** "
+            "average effectiveness"
         )
 
     if attack_lines:
         embed.add_field(
-            name="⚔️ Best damage type to use",
+            name="⚔️ Best damage to use",
             value="\n".join(
                 attack_lines
             ),
@@ -1205,7 +1208,7 @@ def build_hunt_embed(
             f"⚔️ **Recommended damage:** "
             f"{best_attack['emoji']} "
             f"**{best_attack['element']}** "
-            f"({best_attack['average']:.1f}% average)"
+            f"({best_attack['average']:.1f}% medio)"
         )
 
     if defense_ranking:
@@ -1258,14 +1261,14 @@ def build_hunt_embed(
     embed.add_field(
         name="ℹ️ How it is calculated",
         value=(
-            "• **Attack:** average "
-            "elemental effectiveness across all creatures.\n"
-            "• **Defense:** sum of the maximum damage "
+            "• **Attack:** average elemental effectiveness "
+            "across all selected creatures.\n"
+            "• **Defense:** sum of maximum damage "
             "by type recorded for the creatures "
             "and its share of the total.\n"
-            "This is a guideline for choosing a damage type "
-            "and protections; it does not simulate the actual frequency "
-            "of each attack."
+            "This is a guideline for choosing damage type "
+            "and protections; it does not simulate the actual "
+            "frequency of each attack."
         ),
         inline=False
     )
@@ -1281,11 +1284,11 @@ def build_hunt_embed(
 
 class HuntCreaturesModal(
     discord.ui.Modal,
-    title="Analyze Hunt"
+    title="Analizar Hunt"
 ):
 
     creatures = discord.ui.TextInput(
-        label="Which creatures are you going to hunt?",
+        label="Which creatures will you hunt?",
         placeholder=(
             "Enter one creature per line:\n"
             "Juggernaut\n"
@@ -1332,7 +1335,7 @@ class HuntCreaturesModal(
 
         if not requested_names:
             await interaction.followup.send(
-                "❌ You have not entered any creature.",
+                "❌ You have not entered any creatures.",
                 ephemeral=True
             )
             return
@@ -1382,7 +1385,7 @@ class HuntCreaturesModal(
         if not found_creatures:
             await interaction.followup.send(
                 "❌ I could not find any "
-                "of the selected creatures.",
+                "of the specified creatures.",
                 ephemeral=True
             )
             return
@@ -1595,7 +1598,7 @@ def build_full_loot_fields(
 
 
 # =========================================================
-# LOCATIONS
+# LOCALIZACIONES
 # =========================================================
 
 def get_locations_text(
@@ -1859,7 +1862,7 @@ async def build_market_text(
 
         return (
             f"No recent data "
-            f"para **{world}**."
+            f"for **{world}**."
         )
 
     if current.get("rate_limited"):
@@ -1916,15 +1919,486 @@ async def build_market_text(
 
 
 # =========================================================
+# GUILD TRACKING — LEVEL UPS AND DEATHS
+# =========================================================
+
+def connect_tracking_db():
+    return sqlite3.connect(TRACKING_DB_FILE)
+
+
+def crear_tracking_db():
+    conn = connect_tracking_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guild_tracking_config (
+            discord_guild_id INTEGER PRIMARY KEY,
+            tibia_guild_name TEXT NOT NULL,
+            tibia_world TEXT,
+            channel_id INTEGER NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guild_tracking_characters (
+            discord_guild_id INTEGER NOT NULL,
+            character_name TEXT NOT NULL,
+            level INTEGER,
+            last_death_key TEXT,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (discord_guild_id, character_name)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def get_tracking_configs():
+    conn = connect_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT discord_guild_id, tibia_guild_name, tibia_world, channel_id
+        FROM guild_tracking_config
+        WHERE enabled = 1
+        ORDER BY discord_guild_id ASC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_tracking_config(discord_guild_id):
+    conn = connect_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT discord_guild_id, tibia_guild_name, tibia_world, channel_id, enabled
+        FROM guild_tracking_config
+        WHERE discord_guild_id = ?
+    """, (int(discord_guild_id),))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def save_tracking_config(discord_guild_id, tibia_guild_name, tibia_world, channel_id):
+    now = time.time()
+    conn = connect_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO guild_tracking_config (
+            discord_guild_id, tibia_guild_name, tibia_world, channel_id,
+            enabled, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(discord_guild_id) DO UPDATE SET
+            tibia_guild_name = excluded.tibia_guild_name,
+            tibia_world = excluded.tibia_world,
+            channel_id = excluded.channel_id,
+            enabled = 1,
+            updated_at = excluded.updated_at
+    """, (
+        int(discord_guild_id),
+        str(tibia_guild_name),
+        str(tibia_world or ""),
+        int(channel_id),
+        now,
+        now
+    ))
+    conn.commit()
+    conn.close()
+
+
+def delete_tracking_config(discord_guild_id):
+    conn = connect_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM guild_tracking_config WHERE discord_guild_id = ?",
+        (int(discord_guild_id),)
+    )
+    cursor.execute(
+        "DELETE FROM guild_tracking_characters WHERE discord_guild_id = ?",
+        (int(discord_guild_id),)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_tracking_character(discord_guild_id, character_name):
+    conn = connect_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT level, last_death_key
+        FROM guild_tracking_characters
+        WHERE discord_guild_id = ? AND character_name = ? COLLATE NOCASE
+    """, (int(discord_guild_id), str(character_name)))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def save_tracking_character(
+    discord_guild_id,
+    character_name,
+    level=None,
+    last_death_key=None,
+    preserve_death_key=False
+):
+    existing = get_tracking_character(
+        discord_guild_id,
+        character_name
+    )
+
+    if existing:
+        old_level, old_death_key = existing
+        if level is None:
+            level = old_level
+        if preserve_death_key:
+            last_death_key = old_death_key
+
+    conn = connect_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO guild_tracking_characters (
+            discord_guild_id, character_name, level, last_death_key, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(discord_guild_id, character_name) DO UPDATE SET
+            level = excluded.level,
+            last_death_key = excluded.last_death_key,
+            updated_at = excluded.updated_at
+    """, (
+        int(discord_guild_id),
+        str(character_name),
+        int(level) if level is not None else None,
+        last_death_key,
+        time.time()
+    ))
+    conn.commit()
+    conn.close()
+
+
+def limpiar_tracking_members(discord_guild_id, active_names):
+    active = {str(name).casefold() for name in active_names}
+    conn = connect_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT character_name
+        FROM guild_tracking_characters
+        WHERE discord_guild_id = ?
+    """, (int(discord_guild_id),))
+
+    for (name,) in cursor.fetchall():
+        if str(name).casefold() not in active:
+            cursor.execute("""
+                DELETE FROM guild_tracking_characters
+                WHERE discord_guild_id = ? AND character_name = ?
+            """, (int(discord_guild_id), str(name)))
+
+    conn.commit()
+    conn.close()
+
+
+def extract_character_data_and_deaths(data):
+    if not isinstance(data, dict):
+        return None, []
+
+    root = data.get("character")
+    if not isinstance(root, dict):
+        return None, []
+
+    character = root.get("character")
+    if not isinstance(character, dict):
+        character = None
+
+    deaths = root.get("deaths", [])
+    if not isinstance(deaths, list):
+        deaths = []
+
+    return character, deaths
+
+
+def death_killer_names(death):
+    if not isinstance(death, dict):
+        return []
+
+    killers = death.get("killers", [])
+    if not isinstance(killers, list):
+        killers = []
+
+    names = []
+    for killer in killers:
+        if isinstance(killer, dict):
+            name = killer.get("name")
+            if name:
+                names.append(str(name))
+        elif killer:
+            names.append(str(killer))
+
+    return names
+
+
+def make_death_key(death):
+    if not isinstance(death, dict):
+        return None
+
+    payload = {
+        "time": death.get("time"),
+        "level": death.get("level"),
+        "killers": death_killer_names(death),
+        "reason": death.get("reason")
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def death_description(death):
+    if not isinstance(death, dict):
+        return "Unknown cause."
+
+    level = death.get("level", "?")
+    killers = death_killer_names(death)
+    killer_text = ", ".join(killers) if killers else "unknown cause"
+    death_time = death.get("time")
+
+    lines = [
+        f"Died at level **{level}** to **{killer_text}**."
+    ]
+
+    if death_time:
+        lines.append(f"🕒 {death_time}")
+
+    return "\n".join(lines)
+
+
+def build_level_embed(character_name, old_level, new_level, tibia_guild_name, world):
+    gained = max(1, int(new_level) - int(old_level))
+    embed = discord.Embed(
+        title=f"🆙 {character_name} leveled up",
+        description=(
+            f"**{old_level} → {new_level}**"
+            + (f"  (+{gained})" if gained > 1 else "")
+        ),
+        color=discord.Color.green()
+    )
+    embed.add_field(name="🏰 Guild", value=str(tibia_guild_name), inline=True)
+    embed.add_field(name="🌍 World", value=str(world or "?"), inline=True)
+    embed.set_footer(text="Exura • Guild Tracker • TibiaData")
+    return embed
+
+
+def build_death_embed(character_name, death, tibia_guild_name, world):
+    embed = discord.Embed(
+        title=f"☠️ {character_name} died",
+        description=death_description(death),
+        color=discord.Color.red()
+    )
+    embed.add_field(name="🏰 Guild", value=str(tibia_guild_name), inline=True)
+    embed.add_field(name="🌍 World", value=str(world or "?"), inline=True)
+    embed.set_footer(text="Exura • Guild Tracker • TibiaData")
+    return embed
+
+
+async def tracking_send(channel_id, embed):
+    channel = bot.get_channel(int(channel_id))
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(int(channel_id))
+        except Exception:
+            return False
+
+    try:
+        await channel.send(embed=embed)
+        return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+
+async def tracking_scan_character(
+    discord_guild_id,
+    channel_id,
+    tibia_guild_name,
+    world,
+    member,
+    semaphore
+):
+    name = get_first(member, "name", default=None)
+    if not name:
+        return
+
+    try:
+        current_level = int(get_first(member, "level", default=0))
+    except (TypeError, ValueError):
+        current_level = 0
+
+    state = get_tracking_character(discord_guild_id, name)
+
+    # First time: create a baseline and never announce old history.
+    if state is None:
+        save_tracking_character(
+            discord_guild_id,
+            name,
+            level=current_level or None,
+            last_death_key=None
+        )
+        previous_level = None
+        previous_death_key = None
+    else:
+        previous_level, previous_death_key = state
+
+    if (
+        previous_level is not None
+        and current_level > int(previous_level)
+    ):
+        await tracking_send(
+            channel_id,
+            build_level_embed(
+                name,
+                int(previous_level),
+                current_level,
+                tibia_guild_name,
+                world
+            )
+        )
+
+    # Store the level now so level losses can also be detected without announcing them.
+    save_tracking_character(
+        discord_guild_id,
+        name,
+        level=current_level or previous_level,
+        last_death_key=previous_death_key
+    )
+
+    async with semaphore:
+        data = await get_character(name)
+
+    _character, deaths = extract_character_data_and_deaths(data)
+    if not deaths:
+        return
+
+    newest_key = make_death_key(deaths[0])
+    if not newest_key:
+        return
+
+    # First death lookup: establish the baseline without spamming old deaths.
+    if not previous_death_key:
+        save_tracking_character(
+            discord_guild_id,
+            name,
+            level=current_level or previous_level,
+            last_death_key=newest_key
+        )
+        return
+
+    new_deaths = []
+    found_previous = False
+
+    for death in deaths:
+        key = make_death_key(death)
+        if key == previous_death_key:
+            found_previous = True
+            break
+        new_deaths.append(death)
+
+    # If the previous death has fallen out of the list (e.g. due to truncation), avoid
+    # posting a whole block of history; announce at most the most recent one.
+    if not found_previous and new_deaths:
+        new_deaths = new_deaths[:1]
+
+    for death in reversed(new_deaths):
+        await tracking_send(
+            channel_id,
+            build_death_embed(
+                name,
+                death,
+                tibia_guild_name,
+                world
+            )
+        )
+
+    save_tracking_character(
+        discord_guild_id,
+        name,
+        level=current_level or previous_level,
+        last_death_key=newest_key
+    )
+
+
+async def tracking_scan_config(config):
+    discord_guild_id, tibia_guild_name, stored_world, channel_id = config
+
+    data = await get_guild(tibia_guild_name)
+    if not data:
+        return
+
+    guild_info, members = extract_guild_data(data)
+    if not guild_info or not members:
+        return
+
+    canonical_name = get_first(guild_info, "name", default=tibia_guild_name)
+    world = get_first(guild_info, "world", default=stored_world or "?")
+
+    # If Tibia returns the canonical spelling or world, keep the configuration updated.
+    save_tracking_config(
+        discord_guild_id,
+        canonical_name,
+        world,
+        channel_id
+    )
+
+    active_names = [
+        get_first(member, "name", default="")
+        for member in members
+        if get_first(member, "name", default=None)
+    ]
+    limpiar_tracking_members(discord_guild_id, active_names)
+
+    semaphore = asyncio.Semaphore(max(1, TRACKING_MAX_CONCURRENCY))
+    await asyncio.gather(*(
+        tracking_scan_character(
+            discord_guild_id,
+            channel_id,
+            canonical_name,
+            world,
+            member,
+            semaphore
+        )
+        for member in members
+    ))
+
+
+async def guild_tracking_loop():
+    await bot.wait_until_ready()
+
+    # Small startup delay to avoid competing with the bot's initial loading.
+    await asyncio.sleep(10)
+
+    while not bot.is_closed():
+        started = time.time()
+
+        for config in get_tracking_configs():
+            try:
+                await tracking_scan_config(config)
+            except Exception as exc:
+                print(f"[Guild Tracker] Error: {exc}")
+
+        elapsed = time.time() - started
+        wait_for = max(30, TRACKING_POLL_SECONDS - elapsed)
+        await asyncio.sleep(wait_for)
+
+
+# =========================================================
 # WEEKLY DELIVERY TASKS
 # =========================================================
 
-def conectar_delivery_db():
+def connect_delivery_db():
     return sqlite3.connect(DELIVERY_DB_FILE)
 
 
 def crear_delivery_db():
-    conn = conectar_delivery_db()
+    conn = connect_delivery_db()
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS delivery_items (
@@ -1945,9 +2419,9 @@ def crear_delivery_db():
     conn.close()
 
 
-def normalizar_nombre_delivery(nombre):
+def normalize_delivery_name(name_value):
     return " ".join(
-        str(nombre or "")
+        str(name_value or "")
         .replace("’", "'")
         .replace("`", "'")
         .strip()
@@ -1968,8 +2442,8 @@ def formatear_delivery_gp(valor):
     return f"{valor:,}".replace(",", ".") + " gp"
 
 
-def obtener_delivery_items():
-    conn = conectar_delivery_db()
+def get_delivery_items():
+    conn = connect_delivery_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT name, npc_price, market_price, market_updated_at
@@ -1982,7 +2456,7 @@ def obtener_delivery_items():
 
 
 def delivery_cache_timestamp():
-    conn = conectar_delivery_db()
+    conn = connect_delivery_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT MAX(market_updated_at)
@@ -2002,7 +2476,7 @@ def delivery_cache_desactualizada():
 
 
 def ids_delivery_faltantes():
-    conn = conectar_delivery_db()
+    conn = connect_delivery_db()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM delivery_items WHERE item_id IS NULL")
     count = cursor.fetchone()[0]
@@ -2010,27 +2484,27 @@ def ids_delivery_faltantes():
     return count
 
 
-def guardar_ids_delivery(mapa_ids):
-    conn = conectar_delivery_db()
+def save_delivery_ids(mapa_ids):
+    conn = connect_delivery_db()
     cursor = conn.cursor()
-    for nombre, item_id in mapa_ids.items():
+    for name_value, item_id in mapa_ids.items():
         cursor.execute(
             "UPDATE delivery_items SET item_id = ? WHERE name = ?",
-            (item_id, nombre)
+            (item_id, name_value)
         )
     conn.commit()
     conn.close()
 
 
-def guardar_precios_delivery(precios, timestamp):
-    conn = conectar_delivery_db()
+def save_delivery_prices(prices, timestamp):
+    conn = connect_delivery_db()
     cursor = conn.cursor()
-    for item_id, precio in precios.items():
+    for item_id, price in prices.items():
         cursor.execute("""
             UPDATE delivery_items
             SET market_price = ?, market_updated_at = ?
             WHERE item_id = ?
-        """, (precio, timestamp, item_id))
+        """, (price, timestamp, item_id))
     conn.commit()
     conn.close()
 
@@ -2040,22 +2514,22 @@ def http_json_delivery(url, intentos=3):
         "User-Agent": "Exura-Discord-Bot/1.0 (Weekly Delivery price list)",
         "Accept": "application/json"
     }
-    ultimo_error = None
+    last_error = None
     for intento in range(intentos):
         try:
             request = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(request, timeout=30) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
-            ultimo_error = error
+            last_error = error
             if error.code == 429:
                 time.sleep(6 * (intento + 1))
                 continue
             raise
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-            ultimo_error = error
+            last_error = error
             time.sleep(2 * (intento + 1))
-    raise RuntimeError(f"Could not query Tibia Market API: {ultimo_error}")
+    raise RuntimeError(f"Could not query Tibia Market API: {last_error}")
 
 
 def descargar_metadata_delivery():
@@ -2068,28 +2542,28 @@ def descargar_metadata_delivery():
     if not isinstance(metadata, list):
         raise RuntimeError("Unexpected format in /item_metadata")
 
-    conn = conectar_delivery_db()
+    conn = connect_delivery_db()
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM delivery_items")
-    nombres = {normalizar_nombre_delivery(n): n for (n,) in cursor.fetchall()}
+    names = {normalize_delivery_name(n): n for (n,) in cursor.fetchall()}
     conn.close()
 
     encontrados = {}
     for entry in metadata:
         if not isinstance(entry, dict):
             continue
-        nombre = entry.get("name") or entry.get("item_name") or entry.get("itemName")
+        name_value = entry.get("name") or entry.get("item_name") or entry.get("itemName")
         item_id = entry.get("id") or entry.get("item_id") or entry.get("itemId")
-        if not nombre or item_id is None:
+        if not name_value or item_id is None:
             continue
-        norm = normalizar_nombre_delivery(nombre)
-        if norm in nombres:
+        norm = normalize_delivery_name(name_value)
+        if norm in names:
             try:
-                encontrados[nombres[norm]] = int(item_id)
+                encontrados[names[norm]] = int(item_id)
             except (TypeError, ValueError):
                 pass
 
-    guardar_ids_delivery(encontrados)
+    save_delivery_ids(encontrados)
     return len(encontrados)
 
 
@@ -2107,13 +2581,13 @@ def descargar_market_delivery():
     if not isinstance(data, list):
         raise RuntimeError("Unexpected format in /market_values")
 
-    conn = conectar_delivery_db()
+    conn = connect_delivery_db()
     cursor = conn.cursor()
     cursor.execute("SELECT item_id FROM delivery_items WHERE item_id IS NOT NULL")
     wanted_ids = {int(row[0]) for row in cursor.fetchall()}
     conn.close()
 
-    precios = {}
+    prices = {}
     for entry in data:
         if not isinstance(entry, dict):
             continue
@@ -2134,11 +2608,11 @@ def descargar_market_delivery():
         except (TypeError, ValueError):
             sell = None
         if sell is not None and sell >= 0:
-            precios[item_id] = sell
+            prices[item_id] = sell
 
     timestamp = time.time()
-    guardar_precios_delivery(precios, timestamp)
-    return len(precios)
+    save_delivery_prices(prices, timestamp)
+    return len(prices)
 
 
 _delivery_update_lock = asyncio.Lock()
@@ -2147,18 +2621,18 @@ _delivery_update_lock = asyncio.Lock()
 async def actualizar_delivery_market(forzar=False):
     async with _delivery_update_lock:
         if not forzar and not delivery_cache_desactualizada():
-            return True, "recent cache"
+            return True, "fresh cache"
         try:
             if ids_delivery_faltantes() > 0:
                 encontrados = await asyncio.to_thread(descargar_metadata_delivery)
-                print(f"Delivery: {encontrados}/{len(DELIVERY_ITEMS)} IDs identified.")
+                print(f"Delivery: {encontrados}/{len(DELIVERY_ITEMS)} IDs identificados.")
                 await asyncio.sleep(5.5)
-            actualizados = await asyncio.to_thread(descargar_market_delivery)
+            updated_count = await asyncio.to_thread(descargar_market_delivery)
             print(
-                f"Delivery: {actualizados}/{len(DELIVERY_ITEMS)} precios "
-                f"actualizados para {DELIVERY_WORLD}."
+                f"Delivery: {updated_count}/{len(DELIVERY_ITEMS)} prices "
+                f"updated for {DELIVERY_WORLD}."
             )
-            return True, f"{actualizados} prices updated"
+            return True, f"{updated_count} prices updated_count"
         except Exception as error:
             print(f"ERROR updating Delivery Market: {error}")
             return False, str(error)
@@ -2168,20 +2642,20 @@ def texto_antiguedad_delivery():
     timestamp = delivery_cache_timestamp()
     if timestamp is None:
         return "no data"
-    segundos = max(0, int(time.time() - timestamp))
-    if segundos < 3600:
-        return f"{max(1, segundos // 60)} min ago"
-    horas = segundos // 3600
-    if horas < 48:
-        return f"{horas} h ago"
-    return f"{horas // 24} d ago"
+    seconds = max(0, int(time.time() - timestamp))
+    if seconds < 3600:
+        return f"{max(1, seconds // 60)} min ago"
+    hours = seconds // 3600
+    if hours < 48:
+        return f"{hours} h ago"
+    return f"{hours // 24} d ago"
 
 
 class DeliveryLetterSelect(discord.ui.Select):
-    def __init__(self, letras_disponibles):
+    def __init__(self, available_letters):
         opciones = [
-            discord.SelectOption(label=f"Letter {letra}", value=letra, emoji="🔤")
-            for letra in letras_disponibles
+            discord.SelectOption(label=f"Letter {letter}", value=letter, emoji="🔤")
+            for letter in available_letters
         ]
         super().__init__(
             placeholder="🔎 Jump directly to a letter...",
@@ -2195,65 +2669,65 @@ class DeliveryLetterSelect(discord.ui.Select):
         view = self.view
         if not isinstance(view, DeliveryView):
             return
-        view.filtro_letra = self.values[0]
-        view.pagina = 0
+        view.letter_filter = self.values[0]
+        view.page = 0
         view.actualizar_botones()
         view.actualizar_selector()
         await interaction.response.edit_message(
-            content=view.crear_contenido(),
+            content=view.build_content(),
             embed=None,
             view=view
         )
 
 
 class DeliveryView(discord.ui.View):
-    def __init__(self, items, pagina=0, autor_id=None):
+    def __init__(self, items, page=0, author_id=None):
         super().__init__(timeout=300)
         self.todos_items = items
-        self.pagina = pagina
-        self.autor_id = autor_id
+        self.page = page
+        self.author_id = author_id
         self.por_pagina = 20
-        self.filtro_letra = None
-        self.letras_disponibles = sorted({
+        self.letter_filter = None
+        self.available_letters = sorted({
             str(item[0])[0].upper()
             for item in self.todos_items
             if item and item[0]
         })
-        self.selector_letras = DeliveryLetterSelect(self.letras_disponibles)
+        self.selector_letras = DeliveryLetterSelect(self.available_letters)
         self.add_item(self.selector_letras)
         self.actualizar_botones()
         self.actualizar_selector()
 
     @property
     def items(self):
-        if self.filtro_letra is None:
+        if self.letter_filter is None:
             return self.todos_items
         return [
             item for item in self.todos_items
-            if str(item[0]).upper().startswith(self.filtro_letra)
+            if str(item[0]).upper().startswith(self.letter_filter)
         ]
 
     @property
-    def total_paginas(self):
+    def total_pages(self):
         return max(1, (len(self.items) + self.por_pagina - 1) // self.por_pagina)
 
     def actualizar_selector(self):
         self.selector_letras.placeholder = (
-            f"🔎 Current letter: {self.filtro_letra}"
-            if self.filtro_letra
+            f"🔎 Current letter: {self.letter_filter}"
+            if self.letter_filter
             else "🔎 Jump directly to a letter..."
         )
         for opcion in self.selector_letras.options:
-            opcion.default = opcion.value == self.filtro_letra
+            opcion.default = opcion.value == self.letter_filter
 
     def actualizar_botones(self):
-        self.anterior.disabled = self.pagina <= 0
-        self.siguiente.disabled = self.pagina >= self.total_paginas - 1
-        self.todos.disabled = self.filtro_letra is None
+        self.previous.disabled = self.page <= 0
+        self.next_page.disabled = self.page >= self.total_pages - 1
+        self.show_all.disabled = self.letter_filter is None
 
-    def crear_contenido(self):
-        inicio = self.pagina * self.por_pagina
-        pagina_items = self.items[inicio:inicio + self.por_pagina]
+    def build_content(self):
+        inicio = self.page * self.por_pagina
+        page_items = self.items[inicio:inicio + self.por_pagina]
 
         encabezado = (
             "📦 **WEEKLY DELIVERY ITEMS**\n"
@@ -2261,9 +2735,9 @@ class DeliveryView(discord.ui.View):
             f"🕒 Market **{texto_antiguedad_delivery()}**  •  "
             f"📚 **{len(self.todos_items)} items**"
         )
-        if self.filtro_letra:
+        if self.letter_filter:
             encabezado += (
-                f"  •  🔤 **Letter {self.filtro_letra}** "
+                f"  •  🔤 **Letter {self.letter_filter}** "
                 f"({len(self.items)} items)"
             )
 
@@ -2271,54 +2745,54 @@ class DeliveryView(discord.ui.View):
             f"{'ITEM':<30} {'NPC':>12} {'MARKET':>12}",
             f"{'─' * 30} {'─' * 12} {'─' * 12}"
         ]
-        for nombre, npc_price, market_price, _market_updated_at in pagina_items:
-            nombre_corto = nombre if len(nombre) <= 30 else nombre[:27] + "..."
+        for name_value, npc_price, market_price, _market_updated_at in page_items:
+            short_name = name_value if len(name_value) <= 30 else name_value[:27] + "..."
             lineas.append(
-                f"{nombre_corto:<30} "
+                f"{short_name:<30} "
                 f"{formatear_delivery_gp(npc_price):>12} "
                 f"{formatear_delivery_gp(market_price):>12}"
             )
 
         tabla = "\n".join(lineas)
         pie = (
-            f"**Page {self.pagina + 1}/{self.total_paginas}**"
+            f"**Page {self.page + 1}/{self.total_pages}**"
             "  •  Market = lowest sell offer"
         )
         return f"{encabezado}\n\n```text\n{tabla}\n```\n{pie}"
 
     async def interaction_check(self, interaction):
-        if self.autor_id is not None and interaction.user.id != self.autor_id:
+        if self.author_id is not None and interaction.user.id != self.author_id:
             await interaction.response.send_message(
-                "❌ Use your own `/exura delivery`.",
+                "❌ Usa tu propio `/exura delivery`.",
                 ephemeral=True
             )
             return False
         return True
 
     @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.secondary, row=1)
-    async def anterior(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.pagina -= 1
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page -= 1
         self.actualizar_botones()
         await interaction.response.edit_message(
-            content=self.crear_contenido(), embed=None, view=self
+            content=self.build_content(), embed=None, view=self
         )
 
-    @discord.ui.button(label="View all", emoji="📚", style=discord.ButtonStyle.primary, row=1)
-    async def todos(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.filtro_letra = None
-        self.pagina = 0
+    @discord.ui.button(label="Show all", emoji="📚", style=discord.ButtonStyle.primary, row=1)
+    async def show_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.letter_filter = None
+        self.page = 0
         self.actualizar_botones()
         self.actualizar_selector()
         await interaction.response.edit_message(
-            content=self.crear_contenido(), embed=None, view=self
+            content=self.build_content(), embed=None, view=self
         )
 
     @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary, row=1)
-    async def siguiente(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.pagina += 1
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
         self.actualizar_botones()
         await interaction.response.edit_message(
-            content=self.crear_contenido(), embed=None, view=self
+            content=self.build_content(), embed=None, view=self
         )
 
 
@@ -2928,7 +3402,7 @@ def build_split_embed(
             ]
 
             action_lines.append(
-                f"🔴 **{payer}** must pay "
+                f"🔴 **{payer}** needs to pay "
                 f"**{format_gp(amount)}** "
                 f"to **{receiver}**\n"
                 f"🏦 `transfer {amount} to {receiver}`"
@@ -2962,8 +3436,8 @@ def build_split_embed(
         embed.add_field(
             name="💸 What you need to do",
             value=(
-                "✅ No transfers are "
-                "required."
+                "✅ No transfers are needed. "
+                ""
             ),
             inline=False
         )
@@ -2992,9 +3466,9 @@ def build_split_embed(
 
     embed.add_field(
         name=(
-            "💰 Total profit"
+            "💰 Profit total"
             if balance >= 0
-            else "📉 Total waste"
+            else "📉 Waste total"
         ),
         value=(
             f"**{format_gp(balance)}**\n"
@@ -3104,14 +3578,14 @@ def build_split_embed(
         if adjustment > 0:
 
             action = (
-                f"🟢 recibe "
+                f"🟢 receives "
                 f"**{format_gp(adjustment)}**"
             )
 
         elif adjustment < 0:
 
             action = (
-                f"🔴 paga "
+                f"🔴 pays "
                 f"**{format_gp(abs(adjustment))}**"
             )
 
@@ -3261,12 +3735,12 @@ def build_split_embed(
     if difference != 0:
 
         embed.add_field(
-            name="⚠️ Difference detected",
+            name="⚠️ Diferencia detectada",
             value=(
-                "The sum of the balances "
+                "The sum of individual balances "
                 "does not match "
                 "the total balance.\n"
-                f"Difference: "
+                f"Diferencia: "
                 f"**{format_gp(difference)}**"
             ),
             inline=False
@@ -3320,8 +3794,8 @@ class HuntSplitModal(
 
             await interaction.followup.send(
                 "❌ I could not read the Hunt Analyzer.\n\n"
-                "Copy it directly from Tibia, "
-                "including each player\'s block.",
+                "Copy it directly from Tibia "
+                "including each player block.",
                 ephemeral=True
             )
 
@@ -3374,6 +3848,7 @@ class Exura(
         global BOOSTED_BOSS_NAMES
 
         crear_delivery_db()
+        crear_tracking_db()
 
         print(
             "===================================="
@@ -3410,11 +3885,11 @@ class Exura(
 
         print(
             f"{len(BOSSES)} "
-            "bosses cargados."
+            "bosses loaded."
         )
 
         print(
-            "Checking boostable boss..."
+            "Fetching boostable boss..."
         )
 
         boost_data = (
@@ -3437,7 +3912,7 @@ class Exura(
 
         print(
             f"{len(ITEMS)} "
-            "items cargados."
+            "items loaded."
         )
 
         print(
@@ -3447,10 +3922,11 @@ class Exura(
         await self.tree.sync()
 
         print(
-            "Commands synced."
+            "Comandos sincronizados."
         )
 
         asyncio.create_task(actualizar_delivery_market())
+        asyncio.create_task(guild_tracking_loop())
 
 
 bot = Exura()
@@ -3488,7 +3964,7 @@ async def on_ready():
 
 @bot.tree.command(
     name="ping",
-    description="Check whether Exura is working."
+    description="Comprueba si Exura funciona."
 )
 async def ping(
     interaction:
@@ -3541,8 +4017,8 @@ async def split(
 @exura.command(
     name="boosted",
     description=(
-        "Show today\'s boosted creature and "
-        "boosted boss."
+        "Shows the boosted creature and "
+        "boosted boss of the day."
     )
 )
 async def boosted(
@@ -3586,7 +4062,7 @@ async def boosted(
         )
 
     embed = discord.Embed(
-        title="🔥 Today's Boosted",
+        title="🔥 Daily Boosted",
         color=discord.Color.orange()
     )
 
@@ -3726,8 +4202,8 @@ async def boosted(
 @exura.command(
     name="online",
     description=(
-        "Muestra los miembros online "
-        "de Existencia."
+        "Shows online members "
+        "of Existencia."
     )
 )
 async def online(
@@ -3744,8 +4220,8 @@ async def online(
     if not data:
 
         await interaction.followup.send(
-            "❌ No he podido consultar "
-            f"la guild **{GUILD_NAME}**."
+            "❌ I could not query "
+            f"the guild **{GUILD_NAME}**."
         )
 
         return
@@ -3801,8 +4277,8 @@ async def online(
         ),
         description=(
             f"**{len(online_members)}** "
-            f"de **{len(members)}** miembros "
-            "conectados."
+            f"out of **{len(members)}** members "
+            "online."
         ),
         color=(
             discord.Color.green()
@@ -3858,9 +4334,9 @@ async def online(
     else:
 
         embed.add_field(
-            name="🔴 Status",
+            name="🔴 Estado",
             value=(
-                "No hay miembros online "
+                "There are no online members "
                 "ahora mismo."
             ),
             inline=False
@@ -3884,7 +4360,7 @@ async def online(
 @exura.command(
     name="char",
     description=(
-        "Search for information "
+        "Searches for information "
         "about a Tibia character."
     )
 )
@@ -3994,7 +4470,7 @@ async def char(
     )
 
     embed.add_field(
-        name="🏠 Residence",
+        name="🏠 Residencia",
         value=str(
             character.get(
                 "residence",
@@ -4011,7 +4487,7 @@ async def char(
     )
 
     embed.add_field(
-        name="👤 Sex",
+        name="👤 Sexo",
         value=str(
             character.get(
                 "sex",
@@ -4058,7 +4534,7 @@ async def creature_autocomplete(
 @exura.command(
     name="creature",
     description=(
-        "Look up a Tibia creature."
+        "Looks up a Tibia creature."
     )
 )
 @app_commands.autocomplete(
@@ -4122,7 +4598,7 @@ async def creature(
     )
 
     embed.add_field(
-        name="⭐ Experience",
+        name="⭐ Experiencia",
         value=clean_number(
             get_first(
                 data,
@@ -4161,7 +4637,7 @@ async def creature(
     )
 
     embed.add_field(
-        name="🏃 Speed",
+        name="🏃 Velocidad",
         value=str(
             get_first(
                 data,
@@ -4195,7 +4671,7 @@ async def creature(
     )
 
     embed.add_field(
-        name="📦 Highlighted loot",
+        name="📦 Loot destacado",
         value=get_highlight_loot(
             data.get(
                 "loot",
@@ -4206,7 +4682,7 @@ async def creature(
     )
 
     embed.add_field(
-        name="📍 Locations",
+        name="📍 Localizaciones",
         value=get_locations_text(
             get_first(
                 data,
@@ -4230,7 +4706,7 @@ async def creature(
 @exura.command(
     name="hunt",
     description=(
-        "Analyze multiple creatures and recommend "
+        "Analyzes multiple creatures and recommends "
         "damage types and protections."
     )
 )
@@ -4271,7 +4747,7 @@ async def boss_autocomplete(
 @exura.command(
     name="boss",
     description=(
-        "Look up boss information."
+        "Looks up boss information."
     )
 )
 @app_commands.autocomplete(
@@ -4296,7 +4772,7 @@ async def boss(
 
         await interaction.followup.send(
             f"❌ I could not find "
-            f"boss **{name}**."
+            f"el boss **{name}**."
         )
 
         return
@@ -4325,7 +4801,7 @@ async def boss(
     )
 
     embed.add_field(
-        name="⭐ Experience",
+        name="⭐ Experiencia",
         value=clean_number(
             get_first(
                 data,
@@ -4337,7 +4813,7 @@ async def boss(
     )
 
     embed.add_field(
-        name="👑 Type",
+        name="👑 Tipo",
         value=str(
             get_first(
                 data,
@@ -4362,7 +4838,7 @@ async def boss(
     )
 
     embed.add_field(
-        name="🏃 Speed",
+        name="🏃 Velocidad",
         value=str(
             get_first(
                 data,
@@ -4467,10 +4943,10 @@ async def boss(
 
         embed.add_field(
             name=(
-                f"🎁 Full loot ({len(loot)} items)"
+                f"🎁 Loot completo ({len(loot)} items)"
                 if index == 0
                 else
-                f"🎁 Full loot "
+                f"🎁 Loot completo "
                 f"(continued {index + 1})"
             ),
             value=chunk,
@@ -4519,8 +4995,8 @@ async def item_autocomplete(
 @exura.command(
     name="item",
     description=(
-        "Look up item stats "
-        "and price."
+        "Looks up stats "
+        "and item price."
     )
 )
 @app_commands.autocomplete(
@@ -4562,7 +5038,7 @@ async def item(
     )
 
     embed.add_field(
-        name="🏷️ Type",
+        name="🏷️ Tipo",
         value=str(
             get_first(
                 data,
@@ -4746,8 +5222,8 @@ async def delivery(
 ):
     await interaction.response.defer(thinking=True)
 
-    actualizado, _detalle = await actualizar_delivery_market()
-    items = obtener_delivery_items()
+    updated, _detail = await actualizar_delivery_market()
+    items = get_delivery_items()
 
     if not items:
         await interaction.followup.send(
@@ -4758,31 +5234,224 @@ async def delivery(
 
     view = DeliveryView(
         items=items,
-        pagina=0,
-        autor_id=interaction.user.id
+        page=0,
+        author_id=interaction.user.id
     )
 
-    aviso = None
-    if not actualizado and delivery_cache_timestamp() is None:
-        aviso = (
+    notice = None
+    if not updated and delivery_cache_timestamp() is None:
+        notice = (
             "⚠️ The Market API is not responding right now. "
-            "NPC prices are shown; Market prices will appear when "
-            "the first update succeeds."
+            "Showing NPC prices; Market prices will appear once "
+            "the first update is available."
         )
-    elif not actualizado:
-        aviso = (
+    elif not updated:
+        notice = (
             "⚠️ The Market could not be refreshed. "
-            "The latest saved prices are shown."
+            "Showing the latest saved prices."
         )
 
-    contenido = view.crear_contenido()
-    if aviso:
-        contenido = f"{aviso}\n\n{contenido}"
+    content = view.build_content()
+    if notice:
+        content = f"{notice}\n\n{content}"
 
     await interaction.followup.send(
-        content=contenido,
+        content=content,
         view=view
     )
+
+
+# =========================================================
+# /EXURA TRACKING
+# =========================================================
+
+tracking = app_commands.Group(
+    name="tracking",
+    description="Configure automatic guild announcements."
+)
+
+
+@tracking.command(
+    name="setup",
+    description="Track a guild and announce level ups and deaths in a channel."
+)
+@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.describe(
+    guild_name="Exact name of the Tibia guild.",
+    channel="Channel where Exura will post level ups and deaths."
+)
+async def tracking_setup(
+    interaction: discord.Interaction,
+    guild_name: str,
+    channel: discord.TextChannel
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    data = await get_guild(guild_name.strip())
+    if not data:
+        await interaction.followup.send(
+            f"❌ I could not find the guild **{guild_name}** in Tibia.",
+            ephemeral=True
+        )
+        return
+
+    guild_info, members = extract_guild_data(data)
+    if not guild_info:
+        await interaction.followup.send(
+            f"❌ I could not read information for **{guild_name}**.",
+            ephemeral=True
+        )
+        return
+
+    canonical_name = get_first(guild_info, "name", default=guild_name.strip())
+    world = get_first(guild_info, "world", default="?")
+
+    save_tracking_config(
+        interaction.guild.id,
+        canonical_name,
+        world,
+        channel.id
+    )
+
+    # Level baseline: prevents old level-ups from being announced when the tracker is enabled.
+    for member in members:
+        name = get_first(member, "name", default=None)
+        if not name:
+            continue
+        try:
+            level = int(get_first(member, "level", default=0))
+        except (TypeError, ValueError):
+            level = 0
+        save_tracking_character(
+            interaction.guild.id,
+            name,
+            level=level or None,
+            last_death_key=None
+        )
+
+    await interaction.followup.send(
+        "✅ **Guild Tracker enabled**\n"
+        f"🏰 Guild: **{canonical_name}**\n"
+        f"🌍 World: **{world}**\n"
+        f"📢 Channel: {channel.mention}\n"
+        f"👥 Members detected: **{len(members)}**\n\n"
+        "Exura will automatically announce **level ups** and **new deaths**. "
+        "The first death check only creates a baseline and does not publish old history.",
+        ephemeral=True
+    )
+
+
+@tracking.command(
+    name="status",
+    description="Show the guild and channel tracked by this server."
+)
+async def tracking_status(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True
+        )
+        return
+
+    config = get_tracking_config(interaction.guild.id)
+    if not config or not config[4]:
+        await interaction.response.send_message(
+            "ℹ️ This server does not have a Guild Tracker configured.",
+            ephemeral=True
+        )
+        return
+
+    _gid, guild_name, world, channel_id, _enabled = config
+    channel = interaction.guild.get_channel(int(channel_id))
+    channel_text = channel.mention if channel else f"`{channel_id}` (channel not found)"
+
+    await interaction.response.send_message(
+        "📡 **Guild Tracker**\n"
+        f"🏰 Guild: **{guild_name}**\n"
+        f"🌍 World: **{world or '?'}**\n"
+        f"📢 Channel: {channel_text}\n"
+        f"⏱️ Check interval: every **{max(1, TRACKING_POLL_SECONDS // 60)} min**",
+        ephemeral=True
+    )
+
+
+@tracking.command(
+    name="disable",
+    description="Disable automatic guild tracking on this server."
+)
+@app_commands.checks.has_permissions(manage_guild=True)
+async def tracking_disable(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True
+        )
+        return
+
+    config = get_tracking_config(interaction.guild.id)
+    if not config:
+        await interaction.response.send_message(
+            "ℹ️ No Guild Tracker was configured.",
+            ephemeral=True
+        )
+        return
+
+    delete_tracking_config(interaction.guild.id)
+    await interaction.response.send_message(
+        "✅ Guild Tracker disabled on this server.",
+        ephemeral=True
+    )
+
+
+@tracking.command(
+    name="test",
+    description="Send a test message to the configured channel."
+)
+@app_commands.checks.has_permissions(manage_guild=True)
+async def tracking_test(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.",
+            ephemeral=True
+        )
+        return
+
+    config = get_tracking_config(interaction.guild.id)
+    if not config or not config[4]:
+        await interaction.response.send_message(
+            "❌ Configure `/exura tracking setup` first.",
+            ephemeral=True
+        )
+        return
+
+    _gid, guild_name, world, channel_id, _enabled = config
+    embed = discord.Embed(
+        title="✅ Guild Tracker working",
+        description=(
+            f"Exura is ready to announce **level ups** and **deaths** "
+            f"for **{guild_name}**."
+        ),
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="🌍 World", value=str(world or "?"), inline=True)
+    embed.set_footer(text="Exura • Guild Tracker • Test")
+
+    sent = await tracking_send(channel_id, embed)
+    await interaction.response.send_message(
+        "✅ Test message sent." if sent else
+        "❌ I could not write to the configured channel. Check my permissions.",
+        ephemeral=True
+    )
+
+
+exura.add_command(tracking)
 
 
 # =========================================================
@@ -4795,7 +5464,7 @@ bot.tree.add_command(
 
 
 # =========================================================
-# STARTUP
+# ARRANQUE
 # =========================================================
 
 if not TOKEN:
