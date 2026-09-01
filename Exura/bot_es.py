@@ -54,6 +54,9 @@ GUILD_NAME = "Existencia"
 
 BASE_DIR = Path(__file__).resolve().parent
 DELIVERY_DB_FILE = str(BASE_DIR / "delivery_cache.db")
+TRACKING_DB_FILE = str(BASE_DIR / "guild_tracking.db")
+TRACKING_POLL_SECONDS = int(os.getenv("TRACKING_POLL_SECONDS", "300"))
+TRACKING_MAX_CONCURRENCY = int(os.getenv("TRACKING_MAX_CONCURRENCY", "8"))
 DELIVERY_WORLD = os.getenv("DELIVERY_WORLD", "Celesta")
 DELIVERY_CACHE_HOURS = int(os.getenv("DELIVERY_CACHE_HOURS", "12"))
 TIBIA_MARKET_API = os.getenv(
@@ -1916,6 +1919,477 @@ async def build_market_text(
 
 
 # =========================================================
+# GUILD TRACKING — LEVEL UPS Y DEATHS
+# =========================================================
+
+def conectar_tracking_db():
+    return sqlite3.connect(TRACKING_DB_FILE)
+
+
+def crear_tracking_db():
+    conn = conectar_tracking_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guild_tracking_config (
+            discord_guild_id INTEGER PRIMARY KEY,
+            tibia_guild_name TEXT NOT NULL,
+            tibia_world TEXT,
+            channel_id INTEGER NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS guild_tracking_characters (
+            discord_guild_id INTEGER NOT NULL,
+            character_name TEXT NOT NULL,
+            level INTEGER,
+            last_death_key TEXT,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (discord_guild_id, character_name)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def obtener_tracking_configs():
+    conn = conectar_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT discord_guild_id, tibia_guild_name, tibia_world, channel_id
+        FROM guild_tracking_config
+        WHERE enabled = 1
+        ORDER BY discord_guild_id ASC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def obtener_tracking_config(discord_guild_id):
+    conn = conectar_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT discord_guild_id, tibia_guild_name, tibia_world, channel_id, enabled
+        FROM guild_tracking_config
+        WHERE discord_guild_id = ?
+    """, (int(discord_guild_id),))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def guardar_tracking_config(discord_guild_id, tibia_guild_name, tibia_world, channel_id):
+    now = time.time()
+    conn = conectar_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO guild_tracking_config (
+            discord_guild_id, tibia_guild_name, tibia_world, channel_id,
+            enabled, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(discord_guild_id) DO UPDATE SET
+            tibia_guild_name = excluded.tibia_guild_name,
+            tibia_world = excluded.tibia_world,
+            channel_id = excluded.channel_id,
+            enabled = 1,
+            updated_at = excluded.updated_at
+    """, (
+        int(discord_guild_id),
+        str(tibia_guild_name),
+        str(tibia_world or ""),
+        int(channel_id),
+        now,
+        now
+    ))
+    conn.commit()
+    conn.close()
+
+
+def borrar_tracking_config(discord_guild_id):
+    conn = conectar_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM guild_tracking_config WHERE discord_guild_id = ?",
+        (int(discord_guild_id),)
+    )
+    cursor.execute(
+        "DELETE FROM guild_tracking_characters WHERE discord_guild_id = ?",
+        (int(discord_guild_id),)
+    )
+    conn.commit()
+    conn.close()
+
+
+def obtener_tracking_character(discord_guild_id, character_name):
+    conn = conectar_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT level, last_death_key
+        FROM guild_tracking_characters
+        WHERE discord_guild_id = ? AND character_name = ? COLLATE NOCASE
+    """, (int(discord_guild_id), str(character_name)))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+
+def guardar_tracking_character(
+    discord_guild_id,
+    character_name,
+    level=None,
+    last_death_key=None,
+    preserve_death_key=False
+):
+    existing = obtener_tracking_character(
+        discord_guild_id,
+        character_name
+    )
+
+    if existing:
+        old_level, old_death_key = existing
+        if level is None:
+            level = old_level
+        if preserve_death_key:
+            last_death_key = old_death_key
+
+    conn = conectar_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO guild_tracking_characters (
+            discord_guild_id, character_name, level, last_death_key, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(discord_guild_id, character_name) DO UPDATE SET
+            level = excluded.level,
+            last_death_key = excluded.last_death_key,
+            updated_at = excluded.updated_at
+    """, (
+        int(discord_guild_id),
+        str(character_name),
+        int(level) if level is not None else None,
+        last_death_key,
+        time.time()
+    ))
+    conn.commit()
+    conn.close()
+
+
+def limpiar_tracking_members(discord_guild_id, active_names):
+    active = {str(name).casefold() for name in active_names}
+    conn = conectar_tracking_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT character_name
+        FROM guild_tracking_characters
+        WHERE discord_guild_id = ?
+    """, (int(discord_guild_id),))
+
+    for (name,) in cursor.fetchall():
+        if str(name).casefold() not in active:
+            cursor.execute("""
+                DELETE FROM guild_tracking_characters
+                WHERE discord_guild_id = ? AND character_name = ?
+            """, (int(discord_guild_id), str(name)))
+
+    conn.commit()
+    conn.close()
+
+
+def extract_character_data_and_deaths(data):
+    if not isinstance(data, dict):
+        return None, []
+
+    root = data.get("character")
+    if not isinstance(root, dict):
+        return None, []
+
+    character = root.get("character")
+    if not isinstance(character, dict):
+        character = None
+
+    deaths = root.get("deaths", [])
+    if not isinstance(deaths, list):
+        deaths = []
+
+    return character, deaths
+
+
+def death_killer_names(death):
+    if not isinstance(death, dict):
+        return []
+
+    killers = death.get("killers", [])
+    if not isinstance(killers, list):
+        killers = []
+
+    names = []
+    for killer in killers:
+        if isinstance(killer, dict):
+            name = killer.get("name")
+            if name:
+                names.append(str(name))
+        elif killer:
+            names.append(str(killer))
+
+    return names
+
+
+def make_death_key(death):
+    if not isinstance(death, dict):
+        return None
+
+    payload = {
+        "time": death.get("time"),
+        "level": death.get("level"),
+        "killers": death_killer_names(death),
+        "reason": death.get("reason")
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def death_description(death):
+    if not isinstance(death, dict):
+        return "Causa desconocida."
+
+    level = death.get("level", "?")
+    killers = death_killer_names(death)
+    killer_text = ", ".join(killers) if killers else "causa desconocida"
+    death_time = death.get("time")
+
+    lines = [
+        f"Murió a nivel **{level}** por **{killer_text}**."
+    ]
+
+    if death_time:
+        lines.append(f"🕒 {death_time}")
+
+    return "\n".join(lines)
+
+
+def build_level_embed(character_name, old_level, new_level, tibia_guild_name, world):
+    gained = max(1, int(new_level) - int(old_level))
+    embed = discord.Embed(
+        title=f"🆙 {character_name} subió de nivel",
+        description=(
+            f"**{old_level} → {new_level}**"
+            + (f"  (+{gained})" if gained > 1 else "")
+        ),
+        color=discord.Color.green()
+    )
+    embed.add_field(name="🏰 Guild", value=str(tibia_guild_name), inline=True)
+    embed.add_field(name="🌍 Mundo", value=str(world or "?"), inline=True)
+    embed.set_footer(text="Exura • Guild Tracker • TibiaData")
+    return embed
+
+
+def build_death_embed(character_name, death, tibia_guild_name, world):
+    embed = discord.Embed(
+        title=f"☠️ {character_name} ha muerto",
+        description=death_description(death),
+        color=discord.Color.red()
+    )
+    embed.add_field(name="🏰 Guild", value=str(tibia_guild_name), inline=True)
+    embed.add_field(name="🌍 Mundo", value=str(world or "?"), inline=True)
+    embed.set_footer(text="Exura • Guild Tracker • TibiaData")
+    return embed
+
+
+async def tracking_send(channel_id, embed):
+    channel = bot.get_channel(int(channel_id))
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(int(channel_id))
+        except Exception:
+            return False
+
+    try:
+        await channel.send(embed=embed)
+        return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+
+async def tracking_scan_character(
+    discord_guild_id,
+    channel_id,
+    tibia_guild_name,
+    world,
+    member,
+    semaphore
+):
+    name = get_first(member, "name", default=None)
+    if not name:
+        return
+
+    try:
+        current_level = int(get_first(member, "level", default=0))
+    except (TypeError, ValueError):
+        current_level = 0
+
+    state = obtener_tracking_character(discord_guild_id, name)
+
+    # Primera vez: crea baseline y nunca anuncia historial antiguo.
+    if state is None:
+        guardar_tracking_character(
+            discord_guild_id,
+            name,
+            level=current_level or None,
+            last_death_key=None
+        )
+        previous_level = None
+        previous_death_key = None
+    else:
+        previous_level, previous_death_key = state
+
+    if (
+        previous_level is not None
+        and current_level > int(previous_level)
+    ):
+        await tracking_send(
+            channel_id,
+            build_level_embed(
+                name,
+                int(previous_level),
+                current_level,
+                tibia_guild_name,
+                world
+            )
+        )
+
+    # Guardamos ya el nivel para detectar también pérdidas de nivel sin anunciarlas.
+    guardar_tracking_character(
+        discord_guild_id,
+        name,
+        level=current_level or previous_level,
+        last_death_key=previous_death_key
+    )
+
+    async with semaphore:
+        data = await get_character(name)
+
+    _character, deaths = extract_character_data_and_deaths(data)
+    if not deaths:
+        return
+
+    newest_key = make_death_key(deaths[0])
+    if not newest_key:
+        return
+
+    # Primera consulta de deaths: fijamos el punto de partida sin spamear deaths antiguas.
+    if not previous_death_key:
+        guardar_tracking_character(
+            discord_guild_id,
+            name,
+            level=current_level or previous_level,
+            last_death_key=newest_key
+        )
+        return
+
+    new_deaths = []
+    found_previous = False
+
+    for death in deaths:
+        key = make_death_key(death)
+        if key == previous_death_key:
+            found_previous = True
+            break
+        new_deaths.append(death)
+
+    # Si la muerte anterior ya salió de la lista (p. ej. truncado), evitamos
+    # publicar un bloque entero de historial; como máximo anunciamos la más reciente.
+    if not found_previous and new_deaths:
+        new_deaths = new_deaths[:1]
+
+    for death in reversed(new_deaths):
+        await tracking_send(
+            channel_id,
+            build_death_embed(
+                name,
+                death,
+                tibia_guild_name,
+                world
+            )
+        )
+
+    guardar_tracking_character(
+        discord_guild_id,
+        name,
+        level=current_level or previous_level,
+        last_death_key=newest_key
+    )
+
+
+async def tracking_scan_config(config):
+    discord_guild_id, tibia_guild_name, stored_world, channel_id = config
+
+    data = await get_guild(tibia_guild_name)
+    if not data:
+        return
+
+    guild_info, members = extract_guild_data(data)
+    if not guild_info or not members:
+        return
+
+    canonical_name = get_first(guild_info, "name", default=tibia_guild_name)
+    world = get_first(guild_info, "world", default=stored_world or "?")
+
+    # Si Tibia devuelve la grafía canónica o el mundo, mantenemos config actualizada.
+    guardar_tracking_config(
+        discord_guild_id,
+        canonical_name,
+        world,
+        channel_id
+    )
+
+    active_names = [
+        get_first(member, "name", default="")
+        for member in members
+        if get_first(member, "name", default=None)
+    ]
+    limpiar_tracking_members(discord_guild_id, active_names)
+
+    semaphore = asyncio.Semaphore(max(1, TRACKING_MAX_CONCURRENCY))
+    await asyncio.gather(*(
+        tracking_scan_character(
+            discord_guild_id,
+            channel_id,
+            canonical_name,
+            world,
+            member,
+            semaphore
+        )
+        for member in members
+    ))
+
+
+async def guild_tracking_loop():
+    await bot.wait_until_ready()
+
+    # Pequeño margen al arrancar para no competir con la carga inicial del bot.
+    await asyncio.sleep(10)
+
+    while not bot.is_closed():
+        started = time.time()
+
+        for config in obtener_tracking_configs():
+            try:
+                await tracking_scan_config(config)
+            except Exception as exc:
+                print(f"[Guild Tracker] Error: {exc}")
+
+        elapsed = time.time() - started
+        wait_for = max(30, TRACKING_POLL_SECONDS - elapsed)
+        await asyncio.sleep(wait_for)
+
+
+# =========================================================
 # WEEKLY DELIVERY TASKS
 # =========================================================
 
@@ -3374,6 +3848,7 @@ class Exura(
         global BOOSTED_BOSS_NAMES
 
         crear_delivery_db()
+        crear_tracking_db()
 
         print(
             "===================================="
@@ -3451,6 +3926,7 @@ class Exura(
         )
 
         asyncio.create_task(actualizar_delivery_market())
+        asyncio.create_task(guild_tracking_loop())
 
 
 bot = Exura()
@@ -4783,6 +5259,199 @@ async def delivery(
         content=contenido,
         view=view
     )
+
+
+# =========================================================
+# /EXURA TRACKING
+# =========================================================
+
+tracking = app_commands.Group(
+    name="tracking",
+    description="Configura anuncios automáticos de una guild."
+)
+
+
+@tracking.command(
+    name="setup",
+    description="Sigue una guild y anuncia sus levels y deaths en un canal."
+)
+@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.describe(
+    guild_name="Nombre exacto de la guild de Tibia.",
+    channel="Canal donde Exura publicará levels y deaths."
+)
+async def tracking_setup(
+    interaction: discord.Interaction,
+    guild_name: str,
+    channel: discord.TextChannel
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "❌ Este comando solo se puede usar dentro de un servidor.",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    data = await get_guild(guild_name.strip())
+    if not data:
+        await interaction.followup.send(
+            f"❌ No he encontrado la guild **{guild_name}** en Tibia.",
+            ephemeral=True
+        )
+        return
+
+    guild_info, members = extract_guild_data(data)
+    if not guild_info:
+        await interaction.followup.send(
+            f"❌ No he podido leer la información de **{guild_name}**.",
+            ephemeral=True
+        )
+        return
+
+    canonical_name = get_first(guild_info, "name", default=guild_name.strip())
+    world = get_first(guild_info, "world", default="?")
+
+    guardar_tracking_config(
+        interaction.guild.id,
+        canonical_name,
+        world,
+        channel.id
+    )
+
+    # Baseline de niveles: evita que al activar el tracker anuncie levels antiguos.
+    for member in members:
+        name = get_first(member, "name", default=None)
+        if not name:
+            continue
+        try:
+            level = int(get_first(member, "level", default=0))
+        except (TypeError, ValueError):
+            level = 0
+        guardar_tracking_character(
+            interaction.guild.id,
+            name,
+            level=level or None,
+            last_death_key=None
+        )
+
+    await interaction.followup.send(
+        "✅ **Guild Tracker activado**\n"
+        f"🏰 Guild: **{canonical_name}**\n"
+        f"🌍 Mundo: **{world}**\n"
+        f"📢 Canal: {channel.mention}\n"
+        f"👥 Miembros detectados: **{len(members)}**\n\n"
+        "Exura anunciará automáticamente los **level ups** y las **muertes nuevas**. "
+        "La primera comprobación de deaths solo crea el punto de partida y no publica historial antiguo.",
+        ephemeral=True
+    )
+
+
+@tracking.command(
+    name="status",
+    description="Muestra la guild y el canal que está siguiendo este servidor."
+)
+async def tracking_status(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "❌ Este comando solo se puede usar dentro de un servidor.",
+            ephemeral=True
+        )
+        return
+
+    config = obtener_tracking_config(interaction.guild.id)
+    if not config or not config[4]:
+        await interaction.response.send_message(
+            "ℹ️ Este servidor no tiene ningún Guild Tracker configurado.",
+            ephemeral=True
+        )
+        return
+
+    _gid, guild_name, world, channel_id, _enabled = config
+    channel = interaction.guild.get_channel(int(channel_id))
+    channel_text = channel.mention if channel else f"`{channel_id}` (canal no encontrado)"
+
+    await interaction.response.send_message(
+        "📡 **Guild Tracker**\n"
+        f"🏰 Guild: **{guild_name}**\n"
+        f"🌍 Mundo: **{world or '?'}**\n"
+        f"📢 Canal: {channel_text}\n"
+        f"⏱️ Comprobación: cada **{max(1, TRACKING_POLL_SECONDS // 60)} min**",
+        ephemeral=True
+    )
+
+
+@tracking.command(
+    name="disable",
+    description="Desactiva el seguimiento automático de guild en este servidor."
+)
+@app_commands.checks.has_permissions(manage_guild=True)
+async def tracking_disable(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "❌ Este comando solo se puede usar dentro de un servidor.",
+            ephemeral=True
+        )
+        return
+
+    config = obtener_tracking_config(interaction.guild.id)
+    if not config:
+        await interaction.response.send_message(
+            "ℹ️ No había ningún Guild Tracker configurado.",
+            ephemeral=True
+        )
+        return
+
+    borrar_tracking_config(interaction.guild.id)
+    await interaction.response.send_message(
+        "✅ Guild Tracker desactivado en este servidor.",
+        ephemeral=True
+    )
+
+
+@tracking.command(
+    name="test",
+    description="Envía un mensaje de prueba al canal configurado."
+)
+@app_commands.checks.has_permissions(manage_guild=True)
+async def tracking_test(interaction: discord.Interaction):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "❌ Este comando solo se puede usar dentro de un servidor.",
+            ephemeral=True
+        )
+        return
+
+    config = obtener_tracking_config(interaction.guild.id)
+    if not config or not config[4]:
+        await interaction.response.send_message(
+            "❌ Primero configura `/exura tracking setup`.",
+            ephemeral=True
+        )
+        return
+
+    _gid, guild_name, world, channel_id, _enabled = config
+    embed = discord.Embed(
+        title="✅ Guild Tracker funcionando",
+        description=(
+            f"Exura está preparado para anunciar los **levels** y **deaths** "
+            f"de **{guild_name}**."
+        ),
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="🌍 Mundo", value=str(world or "?"), inline=True)
+    embed.set_footer(text="Exura • Guild Tracker • Test")
+
+    sent = await tracking_send(channel_id, embed)
+    await interaction.response.send_message(
+        "✅ Mensaje de prueba enviado." if sent else
+        "❌ No he podido escribir en el canal configurado. Revisa mis permisos.",
+        ephemeral=True
+    )
+
+
+exura.add_command(tracking)
 
 
 # =========================================================
